@@ -27,10 +27,10 @@ and whether use-graycode is active.
 The s32 value will be trunuated and limited to the max and min values of signed values.
 .RS
 .TP
-\\fBsel3=FALSE\\fR, \\fBsel2=FALSE\\fR, \\fBsel1=FALSE\\fR, \\fBsel0=FALSE\\fR
+\\fBsel3=false\\fR, \\fBsel2=false\\fR, \\fBsel1=false\\fR, \\fBsel0=false\\fR
 \\fBout\\fR follows \\fBin0\\fR
 .TP
-\\fBsel3=FALSE\\fR, \\fBsel2=FALSE\\fR, \\fBsel1=FALSE\\fR, \\fBsel0=TRUE\\fR
+\\fBsel3=false\\fR, \\fBsel2=false\\fR, \\fBsel1=false\\fR, \\fBsel0=true\\fR
 \\fBout\\fR follows \\fBin1\\fR
 .TP
 etc.
@@ -44,23 +44,23 @@ pin in bit sel#[4];
 pin out float out_f;
 pin out s32 out_s;
 
-param r float elapsed "Current value of the internal debounce timer\n for debugging.";
-param r s32 selected "Current value of the internal selection variable after conversion\n for debugging";
+pin out float elapsed "Current value of the internal debounce timer\n for debugging.";
+pin out s32 selected "Current value of the internal selection variable after conversion\n for debugging";
 pin in float in##[16] "array of selectable outputs";
 
-variable double delaytime;
-variable int lastnum;
-variable int running;
+variable hal_float_t delaytime;
+variable hal_s32_t lastnum;
+variable hal_bit_t running;
 function _;
 license "GPL";
 ;;
 FUNCTION(_)
 {
-    int i,num = 0;
-    int internal[4];
+    hal_s32_t i,num = 0;
+    hal_bit_t internal[4];
 
     if(suppress_no_input) {
-        if (sel(0) + sel(1) + sel(2) + sel(3) == 0) {
+        if (sel(0) + sel(1) + sel(2) + sel(3) == false) {
             return 0;
         }
     }
@@ -79,15 +79,15 @@ FUNCTION(_)
     if(debounce_time) {
         if (num != lastnum) {
             if (!running) {
-                running = 1;
-                delaytime = 0;
+                running = true;
+                delaytime = 0.0;
             }
             if (delaytime < debounce_time) {
                 delaytime += fperiod;
                 elapsed = delaytime;
                 return 0;
             }else{
-            running = 0;
+            running = false;
             lastnum = num;
             out_s = out_f = in(num);
             return 0;

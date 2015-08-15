@@ -30,12 +30,12 @@ pin out bit out_not "Active low pulse";
 pin in float width=0 "Pulse width in seconds";
 pin out float time_left "Time left in current output pulse";
 
-param rw bit retriggerable=TRUE "Allow additional edges to extend pulse";
-param rw bit rising=TRUE "Trigger on rising edge";
-param rw bit falling=FALSE "Trigger on falling edge";
+pin in bit retriggerable=true "Allow additional edges to extend pulse";
+pin in bit rising=true "Trigger on rising edge";
+pin in bit falling=false "Trigger on falling edge";
 
-variable double timer;
-variable char old_in;
+variable hal_float_t timer;
+variable hal_bit_t old_in;
 
 option extra_inst_setup yes;
 
@@ -46,17 +46,17 @@ license "GPL";
 EXTRA_INST_SETUP()
 {
     timer = 0.0;
-    old_in = 0;
+    old_in = false;
     return 0;
 }
 
 FUNCTION(_)
 {
-    int new, old, trigger;
+    hal_bit_t new, trigger, old;
 
     new = in;
     old = old_in;
-    trigger = 0;
+    trigger = false;
     /* detect edges */
     if ( new && (!old) && rising ) trigger = 1;
     if ( old && (!new) && falling ) trigger = 1;
@@ -65,10 +65,10 @@ FUNCTION(_)
     if ( timer > 0.0 ) {
 	if ( ! retriggerable ) {
 	    /* ignore edges during pulse */
-	    trigger = 0;
+	    trigger = false;
 	}
 	/* decrement timer */
-	timer -= period * 0.000000001;
+	timer -= (hal_float_t) ( period * 0.000000001 );
 	if ( timer < 0.0 ) timer = 0.0;
     }
     if ( trigger ) {
@@ -78,11 +78,11 @@ FUNCTION(_)
     /* drive outputs */
     time_left = timer;
     if ( timer > 0.0 ) {
-	out = 1;
-	out_not = 0;
+	out = true;
+	out_not = false;
     } else {
-	out = 0;
-	out_not = 1;
+	out = false;
+	out_not = true;
     }
 
 return 0;

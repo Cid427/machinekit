@@ -338,14 +338,6 @@ static int comp_id;
 
     names = {}
 
-    if ( ((options.get("MAXCOUNT")) and (options.get("DEFAULTCOUNT")))) :
-        have_count = True
-
-    if options.get("MAXCOUNT"):
-        print >>f, "#define MAXCOUNT %d" % options.get("MAXCOUNT" , 1)
-    if options.get("DEFAULTCOUNT"):
-        print >>f, "#define DEFAULTCOUNT %d" % options.get("DEFAULTCOUNT" , 1)
-
     def q(s):
         s = s.replace("\\", "\\\\")
         s = s.replace("\"", "\\\"")
@@ -389,18 +381,13 @@ static int comp_id;
 ###  Get the values from the instanceparams ############################################################
 
     for name, mptype, value in instanceparams:
-        if (name == 'pincount') or (name == 'maxpincount') or (name == 'iprefix'):
+        if (name == 'pincount') or (name == 'iprefix'):
             if name == 'pincount':
                 if value != None:
                     numpins = int(value)
                     have_numpins = True
                     iplist.append(name)
                     ipvlist.append(int(value))
-                if(not have_count):
-                    raise SystemExit, """\
-                        If a component uses the pincount parameter
-                        to set array sizes
-                        both MAXCOUNT and DEFAULTCOUNT must be set.\n"""
             if name == 'iprefix':
                 if value != None:
                     iprefix_string = to_noquotes(value)
@@ -413,6 +400,16 @@ static int comp_id;
                 if value == None: v = 0
                 else: v = int(value)
                 ipvlist.append(v)
+
+###  Now set max and default pincount sizes  ###############################################################
+
+    if have_numpins :  # if pincount being used
+        if (not options.get("MAXCOUNT")) :
+            option("MAXCOUNT", numpins)
+        print >>f, "#define MAXCOUNT %d" % options.get("MAXCOUNT" , 1)
+        option("DEFAULTCOUNT", numpins)
+        print >>f, "#define DEFAULTCOUNT %d\n" % options.get("DEFAULTCOUNT" , 1)
+        have_count = True
 
 ############################################################################################################
 ##  Helper functions
@@ -490,6 +487,8 @@ static int comp_id;
     else:
         if numpins > maxpins :
             numpins = maxpins
+    mp = int(options.get("MAXCOUNT" , 1) )
+    if maxpins < mp: maxpins = mp
 
 ############################  RTAPI_IP / MP declarations ########################
 
@@ -538,6 +537,7 @@ static int comp_id;
             print >>f, "    hal_%s_t %s[%s];" % (type, to_c(name), maxpins)
         else:
             print >>f, "    hal_%s_t %s;" % (type, to_c(name))
+        print "Warning deprecated type: param pin hal_%s_t %s should be replaced with an \"pin io\" of same type" % (type, to_c(name))
         names[name] = 1
 
 
@@ -570,19 +570,18 @@ static int comp_id;
         names[name] = 1
 
     print >>f, "static int instantiate(const char *name, const int argc, const char**argv);\n"
-
-    print >>f, "static int delete(const char *name, void *inst, const int inst_size);\n"
+    if options.get("extra_inst_cleanup"):
+        print >>f, "static int delete(const char *name, void *inst, const int inst_size);\n"
 
     if options.get("extra_inst_setup"):
         print >>f, "static int extra_inst_setup(struct inst_data* ip, const char *name, int argc, const char**argv);\n"
     if options.get("extra_inst_cleanup"):
-        print >>f, "static void extra_inst_cleanup(void);\n"
+        print >>f, "static void extra_inst_cleanup(const char *name, void *inst, const int inst_size);\n"
 
     if not options.get("no_convenience_defines"):
+# capitalised defines removed to enforce lowercase C boolean values
         print >>f, "#undef TRUE"
-        print >>f, "#define TRUE (1)"
         print >>f, "#undef FALSE"
-        print >>f, "#define FALSE (0)"
         print >>f, "#undef true"
         print >>f, "#define true (1)"
         print >>f, "#undef false"
@@ -769,8 +768,11 @@ static int comp_id;
             strg += "\"%s\", %s);" % (to_c(name), to_c(name))
             print >>f, strg
 
-    print >>f, "    // to use default destructor, use NULL instead of delete"
-    print >>f, "    comp_id = hal_xinit(TYPE_RT, 0, 0, instantiate, delete, compname);"
+    if options.get("extra_inst_cleanup"):
+        print >>f, "    comp_id = hal_xinit(TYPE_RT, 0, 0, instantiate, delete, compname);"
+    else :
+        print >>f, "    comp_id = hal_xinit(TYPE_RT, 0, 0, instantiate, NULL, compname);"
+
     print >>f, "    if (comp_id < 0)"
     print >>f, "        return -1;\n"
 
@@ -798,43 +800,45 @@ static int comp_id;
 ###############################  rtapi_app_exit()  #####################################################
 
     print >>f, "void rtapi_app_exit(void)\n{"
-    if options.get("extra_inst_cleanup"):
-            print >>f, "    extra_inst_cleanup();"
+    
     print >>f, "    hal_exit(comp_id);"
     print >>f, "}\n"
 
 
 #########################   delete()  ####################################################################
+    if options.get("extra_inst_cleanup"):
+        print >>f, "// custom destructor - normally not needed"
+        print >>f, "// pins, params, and functs are automatically deallocated regardless if a"
+        print >>f, "// destructor is used or not (see below)"
+        print >>f, "//"
+        print >>f, "// some objects like vtables, rings, threads are not owned by a component"
+        print >>f, "// interaction with such objects may require a custom destructor for"
+        print >>f, "// cleanup actions"
+        print >>f, "// NB: if a customer destructor is used, it is called"
+        print >>f, "// - after the instance's functs have been removed from their respective threads"
+        print >>f, "//   (so a thread funct call cannot interact with the destructor any more)"
+        print >>f, "// - any pins and params of this instance are still intact when the destructor is"
+        print >>f, "//   called, and they are automatically destroyed by the HAL library once the"
+        print >>f, "//   destructor returns\n"
+        print >>f, "static int delete(const char *name, void *inst, const int inst_size)\n{\n"
 
-    print >>f, "// custom destructor - normally not needed"
-    print >>f, "// pins, params, and functs are automatically deallocated regardless if a"
-    print >>f, "// destructor is used or not (see below)"
-    print >>f, "//"
-    print >>f, "// some objects like vtables, rings, threads are not owned by a component"
-    print >>f, "// interaction with such objects may require a custom destructor for"
-    print >>f, "// cleanup actions"
-    print >>f, "// NB: if a customer destructor is used, it is called"
-    print >>f, "// - after the instance's functs have been removed from their respective threads"
-    print >>f, "//   (so a thread funct call cannot interact with the destructor any more)"
-    print >>f, "// - any pins and params of this instance are still intact when the destructor is"
-    print >>f, "//   called, and they are automatically destroyed by the HAL library once the"
-    print >>f, "//   destructor returns"
-    print >>f, "static int delete(const char *name, void *inst, const int inst_size)\n{\n"
-
-    print >>f, "    hal_print_msg(RTAPI_MSG_DBG,\"%s inst=%s size=%d %p\\n\", __FUNCTION__, name, inst_size, inst);"
-    print >>f, "// Debug print of params and values"
-    for name, mptype, value in instanceparams:
-        if (mptype == 'int'):
-            strg = "    hal_print_msg(RTAPI_MSG_DBG,\"%s: int instance param: %s=%d\",__FUNCTION__,"
-            strg += "\"%s\", %s);" % (to_c(name), to_c(name))
-            print >>f, strg
-        else:
-            strg = "    hal_print_msg(RTAPI_MSG_DBG,\"%s: string instance param: %s=%s\",__FUNCTION__,"
-            strg += "\"%s\", %s);" % (to_c(name), to_c(name))
-            print >>f, strg
-
-    print >>f, "    return 0;\n"
-    print >>f, "}\n"
+#################  how to print contents of params if required #####################################################
+#
+#    print >>f, "    hal_print_msg(RTAPI_MSG_DBG,\"%s inst=%s size=%d %p\\n\", __FUNCTION__, name, inst_size, inst);"
+#    print >>f, "// Debug print of params and values"
+#    for name, mptype, value in instanceparams:
+#        if (mptype == 'int'):
+#            strg = "    hal_print_msg(RTAPI_MSG_DBG,\"%s: int instance param: %s=%d\",__FUNCTION__,"
+#            strg += "\"%s\", %s);" % (to_c(name), to_c(name))
+#            print >>f, strg
+#        else:
+#            strg = "    hal_print_msg(RTAPI_MSG_DBG,\"%s: string instance param: %s=%s\",__FUNCTION__,"
+#            strg += "\"%s\", %s);" % (to_c(name), to_c(name))
+#            print >>f, strg
+#####################################################################################################################
+            
+        print >>f, "    return extra_inst_cleanup(name, inst, inst_size);"
+        print >>f, "}\n"
 
 ######################  preliminary defines before user FUNCTION(_) ######################################
 
@@ -848,7 +852,7 @@ static int comp_id;
             print >>f, "#define EXTRA_INST_SETUP() static int extra_inst_setup(struct inst_data *ip, const char *name, int argc, const char**argv)"
         if options.get("extra_inst_cleanup"):
             print >>f, "#undef EXTRA_INST_CLEANUP"
-            print >>f, "#define EXTRA_INST_CLEANUP() static void extra_inst_cleanup(void)"
+            print >>f, "#define EXTRA_INST_CLEANUP() static void extra_inst_cleanup(const char *name, void *inst, const int inst_size)"
         print >>f, "#undef fperiod"
         print >>f, "#define fperiod (period * 1e-9)"
         for name, type, array, dir, value in pins:
